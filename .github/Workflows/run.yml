@@ -1,6 +1,6 @@
 name: Kalshi Demo Bot
 
-on:
+"on":
   workflow_dispatch:
 
 jobs:
