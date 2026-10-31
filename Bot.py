@@ -1,4 +1,4 @@
-Python
+
 
 # KALSHI AI DEMO BOT
 # Paper trading only - no real money trades
