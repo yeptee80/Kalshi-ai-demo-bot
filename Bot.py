@@ -53,3 +53,16 @@ if __name__ == "__main__":
     show_dashboard()
     print("Bot ready for demo trading.")
     print("No real orders will be placed.")
+def calculate_risk():
+    reserve = balance * 0.20
+    available_funds = balance - reserve
+    risk_limit = min(10, available_funds * 0.02)
+    return reserve, available_funds, risk_limit
+
+
+def show_risk():
+    reserve, available, risk = calculate_risk()
+    print("\n--- RISK MANAGEMENT ---")
+    print(f"Reserve: ${reserve:.2f}")
+    print(f"Available funds: ${available:.2f}")
+    print(f"Maximum trade risk: ${risk:.2f}")
