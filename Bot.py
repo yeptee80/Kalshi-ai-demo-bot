@@ -173,7 +173,10 @@ def main():
     try:
         markets = get_markets()
         print(f"Markets received: {len(markets)}")
-
+if markets:
+    print("SAMPLE STATUS:", markets[0].get("status"))
+    print("SAMPLE CLOSE:", markets[0].get("close_time"))
+    print("SAMPLE FIELDS:", list(markets[0].keys()))
         results = []
 
         for market in markets:
