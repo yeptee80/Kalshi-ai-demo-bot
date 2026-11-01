@@ -2,8 +2,9 @@
 import requests
 from datetime import datetime, timezone
 
-# KALSHI DEMO MARKET SCANNER
-# Public market data only. No real orders.
+# KALSHI MARKET SCANNER
+# DEMO / PUBLIC DATA ONLY
+# DOES NOT PLACE TRADES
 
 API = "https://api.elections.kalshi.com/trade-api/v2"
 
@@ -11,219 +12,243 @@ STARTING_BALANCE = 1000.00
 MAX_RISK_PER_TRADE = 10.00
 DAILY_STOP_LOSS = 100.00
 RESERVE_PERCENT = 0.20
+
 MAX_HOLD_HOURS = 72
+MAX_PAGES = 10
+PAGE_SIZE = 1000
 
-def number(value):
+
+def parse_date(value):
+    if not value:
+        return None
+
     try:
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0
+        return datetime.fromisoformat(
+            value.replace("Z", "+00:00")
+        )
+    except (ValueError, TypeError):
+        return None
 
-def price(market, field):
-    dollars = market.get(field + "_dollars")
-    if dollars is not None:
-        return number(dollars)
-
-    # Older API format used cents
-    cents = market.get(field)
-    if cents is not None:
-        return number(cents) / 100
-
-    return None
 
 def get_markets():
-    markets = []
+    all_markets = []
     cursor = None
 
-    print("Connecting to Kalshi market data...")
-
-    for page in range(3):
+    print("Connecting to Kalshi...")
+    
+    for page in range(MAX_PAGES):
         params = {
             "status": "open",
-            "limit": 200,
-            "with_nested_markets": "true"
+            "limit": PAGE_SIZE
         }
 
         if cursor:
             params["cursor"] = cursor
 
         response = requests.get(
-            API + "/events",
+            API + "/markets",
             params=params,
-            timeout=25
+            timeout=30
         )
-        response.raise_for_status()
 
+        response.raise_for_status()
         data = response.json()
 
-        for event in data.get("events", []):
-            for market in event.get("markets", []):
-                market["_event_title"] = event.get("title", "")
-                market["_category"] = event.get("category", "Unknown")
-                markets.append(market)
+        page_markets = data.get("markets", [])
+        all_markets.extend(page_markets)
+
+        print(
+            "Page",
+            page + 1,
+            "- received",
+            len(page_markets),
+            "markets"
+        )
 
         cursor = data.get("cursor")
+
         if not cursor:
             break
 
-    # Fallback if the events endpoint returns no markets
-    if not markets:
-        response = requests.get(
-            API + "/markets",
-            params={"status": "open", "limit": 1000},
-            timeout=25
-        )
-        response.raise_for_status()
-        markets = response.json().get("markets", [])
+    return all_markets
 
-    return markets
 
-def analyze_market(market):
-    if market.get("status") not in ("open", "active"):
-        return None
+def is_short_term(market):
+    text = (
+        str(market.get("ticker", "")) + " " +
+        str(market.get("title", ""))
+    ).upper()
 
-    close_text = market.get("close_time")
-    if not close_text:
-        return None
+    terms = [
+        "15M", "15-MIN", "15 MIN",
+        "FIFTEEN MINUTE"
+    ]
 
-    try:
-        close_time = datetime.fromisoformat(
-            close_text.replace("Z", "+00:00")
-        )
-        hours_left = (
-            close_time - datetime.now(timezone.utc)
-        ).total_seconds() / 3600
-    except (ValueError, TypeError):
-        return None
+    return any(term in text for term in terms)
 
-    if hours_left <= 0 or hours_left > MAX_HOLD_HOURS:
-        return None
 
-    ticker = market.get("ticker", "")
-    title = market.get("title", "")
-    event_title = market.get("_event_title", "")
-    category = market.get("_category", "Unknown")
+def get_price(market, field):
+    dollars = market.get(field + "_dollars")
 
-    bid = price(market, "yes_bid")
-    ask = price(market, "yes_ask")
+    if dollars is not None:
+        try:
+            return float(dollars)
+        except (ValueError, TypeError):
+            pass
 
-    spread = None
-    if bid is not None and ask is not None and ask >= bid:
-        spread = ask - bid
+    cents = market.get(field)
 
-    volume = number(
-        market.get("volume_fp", market.get("volume", 0))
-    )
+    if cents is not None:
+        try:
+            return float(cents) / 100
+        except (ValueError, TypeError):
+            pass
 
-    short_term = (
-        "15M" in ticker.upper()
-        or "15 MINUTE" in title.upper()
-        or "15-MINUTE" in title.upper()
-        or "15 MINUTE" in event_title.upper()
-    )
+    return None
 
-    # Ranking is based on activity and available price information.
-    # It is NOT a prediction of the outcome.
-    score = 0
-
-    score += min(volume / 100, 30)
-
-    if spread is not None:
-        if spread <= 0.05:
-            score += 30
-        elif spread <= 0.10:
-            score += 20
-        elif spread <= 0.20:
-            score += 10
-    else:
-        score -= 5
-
-    if short_term:
-        score += 20
-
-    if hours_left <= 1:
-        score += 15
-    elif hours_left <= 6:
-        score += 10
-    elif hours_left <= 24:
-        score += 5
-
-    return {
-        "ticker": ticker,
-        "title": title or event_title,
-        "category": category,
-        "hours": hours_left,
-        "volume": volume,
-        "bid": bid,
-        "ask": ask,
-        "spread": spread,
-        "short": short_term,
-        "score": score
-    }
 
 def main():
     print("\n===== KALSHI DEMO SCANNER =====")
-    print(f"Demo starting balance: ${STARTING_BALANCE:.2f}")
-    print(f"Maximum risk per trade: ${MAX_RISK_PER_TRADE:.2f}")
-    print(f"Daily stop loss: ${DAILY_STOP_LOSS:.2f}")
-    print(f"Reserve target: {RESERVE_PERCENT:.0%}")
-    print("Maximum market closing window: 72 hours")
-    print("Scanning all available categories...\n")
+    print("Starting demo balance: $", STARTING_BALANCE)
+    print("Maximum risk per trade: $", MAX_RISK_PER_TRADE)
+    print("Daily loss limit: $", DAILY_STOP_LOSS)
+    print("Profit reserve target:", RESERVE_PERCENT * 100, "%")
+    print("Maximum research window:", MAX_HOLD_HOURS, "hours")
+    print("\nScanning markets...\n")
 
     try:
         markets = get_markets()
-        print(f"Markets received: {len(markets)}")
-if markets:
-    print("SAMPLE STATUS:", markets[0].get("status"))
-    print("SAMPLE CLOSE:", markets[0].get("close_time"))
-    print("SAMPLE FIELDS:", list(markets[0].keys()))
-        results = []
 
-        for market in markets:
-            result = analyze_market(market)
-            if result:
-                results.append(result)
+        print("\nTOTAL MARKETS RECEIVED:", len(markets))
 
-        results.sort(
-            key=lambda item: item["score"],
-            reverse=True
-        )
-
-        print(f"Markets within 72 hours: {len(results)}")
-        print("\n===== TOP MARKET WATCHLIST =====")
-
-        if not results:
-            print("No markets passed the time filter.")
+        if not markets:
+            print("No markets returned by Kalshi.")
             return
 
-        for item in results[:20]:
-            print("\n------------------------------")
-            print(item["title"])
-            print("Category:", item["category"])
-            print("Ticker:", item["ticker"])
-            print(f"Hours until close: {item['hours']:.2f}")
-            print(f"24-hour volume: {item['volume']:.0f}")
+        now = datetime.now(timezone.utc)
 
-            if item["bid"] is not None:
-                print(f"YES bid: ${item['bid']:.4f}")
-            if item["ask"] is not None:
-                print(f"YES ask: ${item['ask']:.4f}")
-            if item["spread"] is not None:
-                print(f"Spread: ${item['spread']:.4f}")
+        within_window = []
+        beyond_window = 0
+        missing_dates = 0
+        short_term_count = 0
+        other_status = 0
 
-            if item["short"]:
-                print("SHORT-TERM MARKET: YES")
+        for market in markets:
+            status = market.get("status", "")
 
-            print(f"Research score: {item['score']:.1f}")
+            if status not in ("open", "active"):
+                other_status += 1
+                continue
+
+            if is_short_term(market):
+                short_term_count += 1
+
+            close_text = (
+                market.get("close_time")
+                or market.get("expiration_time")
+            )
+
+            close_date = parse_date(close_text)
+
+            if close_date is None:
+                missing_dates += 1
+                continue
+
+            if close_date.tzinfo is None:
+                close_date = close_date.replace(
+                    tzinfo=timezone.utc
+                )
+
+            hours_left = (
+                close_date - now
+            ).total_seconds() / 3600
+
+            if hours_left <= 0:
+                continue
+
+            if hours_left <= MAX_HOLD_HOURS:
+                within_window.append(
+                    (hours_left, market)
+                )
+            else:
+                beyond_window += 1
+
+        within_window.sort(key=lambda item: item[0])
+
+        print("\n===== DIAGNOSTIC RESULTS =====")
+        print("Markets received:", len(markets))
+        print("Markets closing within 72 hours:", len(within_window))
+        print("Markets closing later:", beyond_window)
+        print("Markets missing closing dates:", missing_dates)
+        print("15-minute style markets found:", short_term_count)
+        print("Other statuses:", other_status)
+
+        print("\n===== SAMPLE MARKET DATA =====")
+
+        sample = markets[0]
+        print("Sample ticker:", sample.get("ticker"))
+        print("Sample status:", sample.get("status"))
+        print("Sample close time:", sample.get("close_time"))
+        print("Sample expiration:", sample.get("expiration_time"))
+
+        print("\n===== NEAREST CLOSING MARKETS =====")
+
+        # Show nearest closing markets, including those
+        # beyond 72 hours, for diagnosis.
+        candidates = []
+
+        for market in markets:
+            close_text = (
+                market.get("close_time")
+                or market.get("expiration_time")
+            )
+
+            close_date = parse_date(close_text)
+
+            if close_date is None:
+                continue
+
+            if close_date.tzinfo is None:
+                close_date = close_date.replace(
+                    tzinfo=timezone.utc
+                )
+
+            hours = (
+                close_date - now
+            ).total_seconds() / 3600
+
+            if hours > 0 and market.get("status") in ("open", "active"):
+                candidates.append((hours, market))
+
+        candidates.sort(key=lambda item: item[0])
+
+        for hours, market in candidates[:20]:
+            print("\n-------------------------")
+            print("Title:", market.get("title"))
+            print("Ticker:", market.get("ticker"))
+            print("Hours until close:", round(hours, 2))
+            print("Status:", market.get("status"))
+            print("YES bid:", get_price(market, "yes_bid"))
+            print("YES ask:", get_price(market, "yes_ask"))
+
+            if is_short_term(market):
+                print("SHORT-TERM MARKET")
+
+        if not candidates:
+            print("No usable future closing dates found.")
 
         print("\n===== SCAN COMPLETE =====")
-        print("These are research candidates, not guaranteed trades.")
-        print("No orders were placed. Demo mode only.")
+        print("Research only. No trades placed.")
+        print("No real money used.")
 
     except requests.RequestException as error:
-        print("Market data connection error:", error)
+        print("\nKALSHI CONNECTION ERROR:")
+        print(error)
+
     except Exception as error:
-        print("Scanner error:", error)
+        print("\nBOT ERROR:")
+        print(error)
+
 
 if __name__ == "__main__":
     main()
