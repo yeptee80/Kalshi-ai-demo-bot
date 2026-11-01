@@ -9,14 +9,23 @@ MAX_RISK_PER_TRADE = 10.00
 DAILY_STOP_LOSS = 100.00
 RESERVE_PERCENT = 0.20
 
+MAX_HOLD_HOURS = 72
+MAX_SPREAD = 0.10
+MAX_PAGES = 10
+
+def num(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
 def get_markets():
     markets = []
     cursor = None
 
-    print("Connecting to Kalshi...")
-
-    for page in range(10):
+    for page in range(MAX_PAGES):
         params = {"status": "open", "limit": 1000}
+
         if cursor:
             params["cursor"] = cursor
 
@@ -26,86 +35,181 @@ def get_markets():
             timeout=30
         )
         response.raise_for_status()
-        data = response.json()
 
+        data = response.json()
         markets.extend(data.get("markets", []))
         cursor = data.get("cursor")
+
+        print("Downloaded page", page + 1)
 
         if not cursor:
             break
 
     return markets
 
-def dollars(market, field):
-    value = market.get(field + "_dollars")
-    if value is not None:
-        try:
-            return float(value)
-        except (ValueError, TypeError):
-            return None
-    return None
+def short_term(market):
+    text = " ".join([
+        str(market.get("ticker", "")),
+        str(market.get("event_ticker", "")),
+        str(market.get("title", "")),
+        str(market.get("subtitle", ""))
+    ]).upper()
+
+    patterns = [
+        "15M", "15 MIN", "15-MIN",
+        "FIFTEEN MIN", "1H", "1HR",
+        "HOURLY"
+    ]
+
+    return any(pattern in text for pattern in patterns)
+
+def analyze(market, now):
+    if market.get("status") != "active":
+        return None, "inactive"
+
+    close_text = market.get("close_time")
+
+    if not close_text:
+        return None, "no closing time"
+
+    try:
+        close = datetime.fromisoformat(
+            close_text.replace("Z", "+00:00")
+        )
+
+        if close.tzinfo is None:
+            close = close.replace(tzinfo=timezone.utc)
+
+        hours = (close - now).total_seconds() / 3600
+
+    except (ValueError, TypeError):
+        return None, "bad date"
+
+    if hours <= 0 or hours > MAX_HOLD_HOURS:
+        return None, "outside time window"
+
+    yes_bid = num(market.get("yes_bid_dollars"))
+    yes_ask = num(market.get("yes_ask_dollars"))
+    no_bid = num(market.get("no_bid_dollars"))
+    no_ask = num(market.get("no_ask_dollars"))
+
+    volume = num(market.get("volume_24h_fp"))
+
+    yes_spread = yes_ask - yes_bid
+    no_spread = no_ask - no_bid
+
+    yes_valid = (
+        0 < yes_bid < 1
+        and 0 < yes_ask < 1
+        and yes_ask >= yes_bid
+        and yes_spread <= MAX_SPREAD
+    )
+
+    no_valid = (
+        0 < no_bid < 1
+        and 0 < no_ask < 1
+        and no_ask >= no_bid
+        and no_spread <= MAX_SPREAD
+    )
+
+    if not yes_valid and not no_valid:
+        return None, "no usable two-sided quotes"
+
+    if volume <= 0:
+        return None, "no recent volume"
+
+    best_spread = min(
+        yes_spread if yes_valid else 999,
+        no_spread if no_valid else 999
+    )
+
+    score = 100 - (best_spread * 500)
+    score += min(volume, 1000) / 100
+
+    if short_term(market):
+        score += 20
+
+    if hours <= 6:
+        score += 10
+
+    return {
+        "ticker": market.get("ticker", ""),
+        "event": market.get("event_ticker", ""),
+        "title": market.get("title", ""),
+        "yes_bid": yes_bid,
+        "yes_ask": yes_ask,
+        "no_bid": no_bid,
+        "no_ask": no_ask,
+        "volume": volume,
+        "spread": best_spread,
+        "hours": hours,
+        "short": short_term(market),
+        "score": score
+    }, "qualified"
 
 def main():
-    print("\n===== KALSHI MARKET DETAILS =====")
+    print("\n===== KALSHI OPPORTUNITY SCANNER =====")
     print("Demo balance: $", STARTING_BALANCE)
     print("Maximum risk per trade: $", MAX_RISK_PER_TRADE)
     print("Daily loss limit: $", DAILY_STOP_LOSS)
     print("Reserve target:", RESERVE_PERCENT * 100, "%")
+    print("Demo mode only. No orders placed.\n")
 
     try:
         markets = get_markets()
-        print("\nTOTAL MARKETS:", len(markets))
-
         now = datetime.now(timezone.utc)
-        candidates = []
+
+        qualified = []
+        rejected = {}
+        short_count = 0
 
         for market in markets:
-            close_text = market.get("close_time")
-            if not close_text:
-                continue
+            if short_term(market):
+                short_count += 1
 
-            try:
-                close_date = datetime.fromisoformat(
-                    close_text.replace("Z", "+00:00")
-                )
-                hours = (
-                    close_date - now
-                ).total_seconds() / 3600
-            except (ValueError, TypeError):
-                continue
+            result, reason = analyze(market, now)
 
-            if 0 < hours <= 72:
-                candidates.append((hours, market))
+            if result:
+                qualified.append(result)
+            else:
+                rejected[reason] = rejected.get(reason, 0) + 1
 
-        candidates.sort(key=lambda item: item[0])
+        qualified.sort(
+            key=lambda item: item["score"],
+            reverse=True
+        )
 
-        print("Markets closing within 72 hours:", len(candidates))
-        print("\n===== FIRST 30 MARKETS =====")
+        print("\n===== SCAN RESULTS =====")
+        print("Markets downloaded:", len(markets))
+        print("Short-term keyword matches:", short_count)
+        print("Tradeable research candidates:", len(qualified))
 
-        for hours, market in candidates[:30]:
-            print("\n------------------------------")
-            print("TITLE:", market.get("title"))
-            print("SUBTITLE:", market.get("subtitle"))
-            print("YES DESCRIPTION:", market.get("yes_sub_title"))
-            print("NO DESCRIPTION:", market.get("no_sub_title"))
-            print("MARKET TICKER:", market.get("ticker"))
-            print("EVENT TICKER:", market.get("event_ticker"))
-            print("CATEGORY:", market.get("category"))
-            print("STATUS:", market.get("status"))
-            print("HOURS UNTIL CLOSE:", round(hours, 2))
+        print("\n===== FILTER RESULTS =====")
 
-            print("YES BID:", dollars(market, "yes_bid"))
-            print("YES ASK:", dollars(market, "yes_ask"))
-            print("NO BID:", dollars(market, "no_bid"))
-            print("NO ASK:", dollars(market, "no_ask"))
-            print("LAST PRICE:", dollars(market, "last_price"))
+        for reason, count in rejected.items():
+            print(reason + ":", count)
 
-            print("VOLUME:", market.get("volume_fp"))
-            print("24H VOLUME:", market.get("volume_24h_fp"))
-            print("OPEN INTEREST:", market.get("open_interest_fp"))
+        print("\n===== TOP OPPORTUNITIES =====")
+
+        for item in qualified[:20]:
+            print("\n------------------------")
+            print("TITLE:", item["title"])
+            print("TICKER:", item["ticker"])
+            print("EVENT:", item["event"])
+            print("YES BID:", item["yes_bid"])
+            print("YES ASK:", item["yes_ask"])
+            print("NO BID:", item["no_bid"])
+            print("NO ASK:", item["no_ask"])
+            print("SPREAD:", round(item["spread"], 4))
+            print("24H VOLUME:", item["volume"])
+            print("HOURS LEFT:", round(item["hours"], 2))
+            print("15M/HOURLY KEYWORD:", item["short"])
+            print("RESEARCH SCORE:", round(item["score"], 2))
 
         print("\n===== SCAN COMPLETE =====")
-        print("Research only. No orders placed.")
+        print("Scores rank market activity and quote quality.")
+        print("They do not predict winning outcomes.")
+        print("No trades were placed.")
 
     except requests.RequestException as error:
         print("CONNECTION ERROR:", error)
