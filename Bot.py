@@ -1,90 +1,173 @@
 
 import requests
+from datetime import datetime, timezone
 
 API = "https://api.elections.kalshi.com/trade-api/v2"
 
-def get_markets():
-    markets = []
+def get_data(path, params=None):
+    r = requests.get(API + path, params=params, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+def get_series():
+    data = get_data("/series")
+    return {
+        s["ticker"]: s
+        for s in data.get("series", [])
+        if s.get("ticker")
+    }
+
+def get_events():
+    events = []
     cursor = None
 
-    for page in range(10):
-        params = {"status": "open", "limit": 1000}
+    for _ in range(15):
+        params = {
+            "status": "open",
+            "limit": 200,
+            "with_nested_markets": "true"
+        }
         if cursor:
             params["cursor"] = cursor
 
-        response = requests.get(
-            API + "/markets",
-            params=params,
-            timeout=30
-        )
-        response.raise_for_status()
-
-        data = response.json()
-        markets.extend(data.get("markets", []))
+        data = get_data("/events", params)
+        events.extend(data.get("events", []))
         cursor = data.get("cursor")
 
         if not cursor:
             break
 
-    return markets
+    return events
 
-def is_short_term(market):
-    ticker = str(market.get("ticker", "")).upper()
-    title = str(market.get("title", "")).upper()
-    subtitle = str(market.get("subtitle", "")).upper()
+def num(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
-    text = ticker + " " + title + " " + subtitle
+def hours_left(close_time):
+    if not close_time:
+        return None
+    try:
+        close = datetime.fromisoformat(
+            close_time.replace("Z", "+00:00")
+        )
+        return (
+            close - datetime.now(timezone.utc)
+        ).total_seconds() / 3600
+    except (ValueError, TypeError):
+        return None
 
-    terms = [
-        "15M", "15-MIN", "15 MIN",
-        "FIFTEEN MIN", "1H", "1HR", "HOURLY"
-    ]
+def classify_time(market, series):
+    text = " ".join([
+        str(market.get("ticker", "")),
+        str(market.get("title", "")),
+        str(market.get("subtitle", "")),
+        str(series.get("frequency", ""))
+    ]).upper()
 
-    return any(term in text for term in terms)
+    if any(x in text for x in ["15M", "15 MIN", "15-MIN", "15MIN"]):
+        return "15-minute"
+
+    if any(x in text for x in ["HOURLY", "1 HOUR", "1-HOUR", "1HR"]):
+        return "hourly"
+
+    hours = hours_left(market.get("close_time"))
+
+    if hours is not None and 0 < hours <= 24:
+        return "under 24 hours"
+
+    if hours is not None and 24 < hours <= 72:
+        return "1-3 days"
+
+    return "other"
 
 def main():
-    print("KALSHI SHORT-TERM MARKET INVESTIGATION")
+    print("KALSHI ALL-CATEGORY SCANNER")
+    print("PUBLIC DATA ONLY - NO TRADES")
 
     try:
-        markets = get_markets()
+        series_map = get_series()
+        events = get_events()
 
-        short_markets = [
-            market for market in markets
-            if is_short_term(market)
-        ]
+        categories = {}
+        time_groups = {}
+        candidates = []
 
-        print("TOTAL MARKETS:", len(markets))
-        print("SHORT-TERM MATCHES:", len(short_markets))
+        for event in events:
+            series = series_map.get(
+                event.get("series_ticker"), {}
+            )
 
-        print("\n===== SHORT-TERM MARKET DETAILS =====")
+            category = (
+                series.get("category")
+                or event.get("category")
+                or "Unclassified"
+            )
 
-        for market in short_markets[:65]:
-            print("\n------------------------------")
-            print("TITLE:", market.get("title"))
-            print("SUBTITLE:", market.get("subtitle"))
-            print("YES DESCRIPTION:", market.get("yes_sub_title"))
-            print("NO DESCRIPTION:", market.get("no_sub_title"))
-            print("TICKER:", market.get("ticker"))
-            print("EVENT:", market.get("event_ticker"))
-            print("STATUS:", market.get("status"))
-            print("CLOSE:", market.get("close_time"))
+            categories[category] = categories.get(category, 0) + 1
 
-            print("YES BID:", market.get("yes_bid_dollars"))
-            print("YES ASK:", market.get("yes_ask_dollars"))
-            print("NO BID:", market.get("no_bid_dollars"))
-            print("NO ASK:", market.get("no_ask_dollars"))
+            for market in event.get("markets", []):
+                group = classify_time(market, series)
+                time_groups[group] = time_groups.get(group, 0) + 1
 
-            print("LAST PRICE:", market.get("last_price_dollars"))
-            print("24H VOLUME:", market.get("volume_24h_fp"))
-            print("TOTAL VOLUME:", market.get("volume_fp"))
-            print("OPEN INTEREST:", market.get("open_interest_fp"))
+                yes_bid = num(market.get("yes_bid_dollars"))
+                yes_ask = num(market.get("yes_ask_dollars"))
+                no_bid = num(market.get("no_bid_dollars"))
+                no_ask = num(market.get("no_ask_dollars"))
+                volume = num(market.get("volume_24h_fp"))
 
-            print("RULES:", str(
-                market.get("rules_primary", "")
-            )[:250])
+                valid = (
+                    0 < yes_ask < 1
+                    and 0 < no_ask < 1
+                    and 0 <= yes_bid <= yes_ask
+                    and 0 <= no_bid <= no_ask
+                )
 
-        print("\n===== INVESTIGATION COMPLETE =====")
-        print("No trades placed. Public data only.")
+                if valid and volume > 0:
+                    candidates.append({
+                        "category": category,
+                        "group": group,
+                        "title": market.get("title", ""),
+                        "ticker": market.get("ticker", ""),
+                        "yes": (yes_bid, yes_ask),
+                        "no": (no_bid, no_ask),
+                        "volume": volume
+                    })
+
+        print("\nOPEN EVENTS:", len(events))
+        print("SERIES FOUND:", len(series_map))
+
+        print("\nCATEGORY COUNTS")
+        for name, count in sorted(
+            categories.items(),
+            key=lambda item: item[1],
+            reverse=True
+        ):
+            print(name, ":", count)
+
+        print("\nTIME GROUP COUNTS")
+        for name, count in sorted(time_groups.items()):
+            print(name, ":", count)
+
+        candidates.sort(
+            key=lambda item: item["volume"],
+            reverse=True
+        )
+
+        print("\nUSABLE QUOTE CANDIDATES:", len(candidates))
+
+        for item in candidates[:50]:
+            print("\n--------------------")
+            print("CATEGORY:", item["category"])
+            print("TIME:", item["group"])
+            print("TITLE:", item["title"])
+            print("TICKER:", item["ticker"])
+            print("YES BID/ASK:", item["yes"])
+            print("NO BID/ASK:", item["no"])
+            print("24H VOLUME:", item["volume"])
+
+        print("\nSCAN COMPLETE - NO ORDERS PLACED")
 
     except requests.RequestException as error:
         print("CONNECTION ERROR:", error)
