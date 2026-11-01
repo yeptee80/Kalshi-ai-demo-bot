@@ -79,7 +79,7 @@ def get_markets():
     return markets
 
 def analyze_market(market):
-    if market.get("status") != "open":
+    if market.get("status") not in ("open", "active"):
         return None
 
     close_text = market.get("close_time")
