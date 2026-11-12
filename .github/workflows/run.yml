@@ -50,6 +50,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           cp paper-state/ledger.json "$RUNNER_TEMP/ledger.json"
+          rm -f paper-state/ledger.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if git show-ref --verify --quiet refs/remotes/origin/paper-ledger; then
