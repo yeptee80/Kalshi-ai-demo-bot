@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "cash": "952.9600",
+  "cash": "949.2500",
   "days": {
     "2026-11-11": {
       "start": "1000.00",
@@ -21,7 +21,11 @@
       "fee_multiplier": "1",
       "opened_at": "2026-11-12T01:40:45.312776+00:00",
       "close_time": "2026-11-12T01:45:00Z",
-      "payout": null
+      "payout": "0",
+      "result": "yes",
+      "settled_at": "2026-11-12T01:53:06.914508+00:00",
+      "exchange_settlement_at": "2026-11-12T01:45:01.370309Z",
+      "net_pnl": "-23.6800"
     },
     "KXSILVER15M-26NOV112045-45": {
       "ticker": "KXSILVER15M-26NOV112045-45",
@@ -36,6 +40,40 @@
       "fee_multiplier": "1",
       "opened_at": "2026-11-12T01:40:45.412156+00:00",
       "close_time": "2026-11-12T01:45:00Z",
+      "payout": "31",
+      "result": "no",
+      "settled_at": "2026-11-12T01:53:06.997688+00:00",
+      "exchange_settlement_at": "2026-11-12T01:45:26.257794Z",
+      "net_pnl": "7.6400"
+    },
+    "KXBTC15M-26NOV112100-00": {
+      "ticker": "KXBTC15M-26NOV112100-00",
+      "category": "Crypto",
+      "side": "no",
+      "quantity": 33,
+      "entry_ask": "0.6900",
+      "entry_bid": "0.6800",
+      "entry_spread": "0.0100",
+      "premium": "22.7700",
+      "fee": "0.50",
+      "fee_multiplier": "1",
+      "opened_at": "2026-11-12T01:53:16.612928+00:00",
+      "close_time": "2026-11-12T02:00:00Z",
+      "payout": null
+    },
+    "KXZEC15M-26NOV112100-00": {
+      "ticker": "KXZEC15M-26NOV112100-00",
+      "category": "Crypto",
+      "side": "no",
+      "quantity": 16,
+      "entry_ask": "0.7000",
+      "entry_bid": "0.6900",
+      "entry_spread": "0.0100",
+      "premium": "11.2000",
+      "fee": "0.24",
+      "fee_multiplier": "1",
+      "opened_at": "2026-11-12T01:53:16.864890+00:00",
+      "close_time": "2026-11-12T02:00:00Z",
       "payout": null
     }
   }
