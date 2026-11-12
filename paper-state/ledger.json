@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "cash": "952.9600",
+  "days": {
+    "2026-11-11": {
+      "start": "1000.00",
+      "stopped": false
+    }
+  },
+  "trades": {
+    "KXETH15M-26NOV112045-45": {
+      "ticker": "KXETH15M-26NOV112045-45",
+      "category": "Crypto",
+      "side": "no",
+      "quantity": 39,
+      "entry_ask": "0.5900",
+      "entry_bid": "0.5800",
+      "entry_spread": "0.0100",
+      "premium": "23.0100",
+      "fee": "0.67",
+      "fee_multiplier": "1",
+      "opened_at": "2026-11-12T01:40:45.312776+00:00",
+      "close_time": "2026-11-12T01:45:00Z",
+      "payout": null
+    },
+    "KXSILVER15M-26NOV112045-45": {
+      "ticker": "KXSILVER15M-26NOV112045-45",
+      "category": "Commodities",
+      "side": "no",
+      "quantity": 31,
+      "entry_ask": "0.7400",
+      "entry_bid": "0.7300",
+      "entry_spread": "0.0100",
+      "premium": "22.9400",
+      "fee": "0.42",
+      "fee_multiplier": "1",
+      "opened_at": "2026-11-12T01:40:45.412156+00:00",
+      "close_time": "2026-11-12T01:45:00Z",
+      "payout": null
+    }
+  }
+}
