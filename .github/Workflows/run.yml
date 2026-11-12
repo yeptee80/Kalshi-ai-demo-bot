@@ -1,22 +1,66 @@
+
 name: Kalshi Demo Bot
 
-"on":
+on:
   workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: kalshi-paper-account
+  cancel-in-progress: false
 
 jobs:
-  run-demo:
+  paper-bot:
     runs-on: ubuntu-latest
     steps:
-      - name: Get bot code
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install requirements
-        run: pip install -r Requirements.txt
+      - name: Test bot
+        run: python -m unittest discover -s tests -v
 
-      - name: Run demo bot
-        run: python Bot.py
+      - name: Scan after changes
+        if: github.event_name == 'push'
+        run: python Bot.py --scan-only
+
+      - name: Restore paper account
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          mkdir -p paper-state
+          if git fetch origin paper-ledger:refs/remotes/origin/paper-ledger 2>/dev/null; then
+            git show origin/paper-ledger:paper-state/ledger.json > paper-state/ledger.json
+          fi
+
+      - name: Simulate trades and report
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          python Bot.py --report paper-report.md
+          cat paper-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save paper account
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          cp paper-state/ledger.json "$RUNNER_TEMP/ledger.json"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git show-ref --verify --quiet refs/remotes/origin/paper-ledger; then
+            git switch -C paper-ledger origin/paper-ledger
+          else
+            git switch --orphan paper-ledger
+          fi
+          mkdir -p paper-state
+          cp "$RUNNER_TEMP/ledger.json" paper-state/ledger.json
+          git add paper-state/ledger.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Save paper account results"
+            git push origin HEAD:paper-ledger
+          fi
